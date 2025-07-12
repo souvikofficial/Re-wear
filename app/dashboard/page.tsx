@@ -160,7 +160,7 @@ export default function DashboardPage() {
               {userItems.map((item) => (
                 <Card key={item.id}>
                   <div className="aspect-square bg-gray-100 relative">
-                    {item.images.length > 0 ? (
+                    {item.images && item.images.length > 0 ? (
                       <img
                         src={item.images[0] || "/placeholder.svg"}
                         alt={item.title}
@@ -230,7 +230,7 @@ export default function DashboardPage() {
                       <div>
                         <CardTitle className="text-lg">{swap.item?.title || "Unknown Item"}</CardTitle>
                         <CardDescription>
-                          {swap.requester?.name || "Unknown User"} • {new Date(swap.requested_at).toLocaleDateString()}
+                          {swap.requester?.name || "Unknown User"} • {new Date(swap.created_at).toLocaleDateString()}
                         </CardDescription>
                       </div>
                       <Badge

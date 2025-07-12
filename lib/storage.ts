@@ -1,32 +1,55 @@
 import { supabase } from "./supabase"
 
+/* =========================================================================
+   Service
+   ====================================================================== */
 export const storageService = {
-  async uploadItemImage(file: File, itemId: string): Promise<string> {
-    const fileExt = file.name.split(".").pop()
-    const fileName = `${itemId}-${Date.now()}.${fileExt}`
-    const filePath = `items/${fileName}`
+  /** Upload multiple images for an item */
+  async uploadItemImages(files: File[]): Promise<string[]> {
+    const uploadedUrls: string[] = []
 
-    const { error: uploadError } = await supabase.storage.from("items").upload(filePath, file)
+    for (const file of files) {
+      const filePath = `item_images/${Date.now()}-${file.name}`
+      const { data, error } = await supabase.storage.from("rewear_images").upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+      })
 
-    if (uploadError) throw uploadError
+      if (error) {
+        console.error("storageService.uploadItemImages error:", error)
+        throw new Error(`Failed to upload image: ${file.name}.`)
+      }
 
-    const { data } = supabase.storage.from("items").getPublicUrl(filePath)
+      const { data: publicUrlData } = supabase.storage.from("rewear_images").getPublicUrl(data.path)
+      uploadedUrls.push(publicUrlData.publicUrl)
+    }
 
-    return data.publicUrl
+    return uploadedUrls
   },
 
-  async deleteItemImage(imagePath: string) {
-    const path = imagePath.split("/").pop()
-    if (!path) return
+  /** Delete images by their public URLs */
+  async deleteItemImages(urls: string[]) {
+    const pathsToDelete = urls
+      .map((url) => {
+        // Extract path from public URL
+        const urlParts = url.split("/")
+        const bucketIndex = urlParts.indexOf("rewear_images")
+        if (bucketIndex > -1) {
+          return urlParts.slice(bucketIndex + 1).join("/")
+        }
+        return ""
+      })
+      .filter((path) => path !== "") // Filter out any empty paths
 
-    const { error } = await supabase.storage.from("items").remove([`items/${path}`])
+    if (pathsToDelete.length === 0) {
+      return // Nothing to delete
+    }
 
-    if (error) throw error
-  },
+    const { error } = await supabase.storage.from("rewear_images").remove(pathsToDelete)
 
-  getImageUrl(path: string) {
-    const { data } = supabase.storage.from("items").getPublicUrl(path)
-
-    return data.publicUrl
+    if (error) {
+      console.error("storageService.deleteItemImages error:", error)
+      throw new Error("Failed to delete images.")
+    }
   },
 }

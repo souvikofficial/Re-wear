@@ -1,224 +1,121 @@
-import { supabase } from "./supabase"
+import { createClient } from "@supabase/supabase-js"
 
-export interface AuthError {
-  message: string
-  type: "validation" | "network" | "auth" | "server"
-  details?: string
+// Initialize Supabase client for client-side operations
+// Ensure these environment variables are set in your Vercel project settings
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.")
 }
 
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+/* =========================================================================
+   Types
+   ====================================================================== */
+export interface UserProfile {
+  id: string
+  name: string | null
+  email: string
+  avatar_url: string | null
+  points: number
+  created_at: string
+  updated_at: string
+}
+
+/* =========================================================================
+   Service
+   ====================================================================== */
 export const authService = {
-  async signUp(email: string, password: string, name: string) {
-    try {
-      // First, check if user already exists
-      const { data: existingUser } = await supabase.from("users").select("email").eq("email", email).single()
-
-      if (existingUser) {
-        throw new Error("An account with this email already exists. Please sign in instead.")
-      }
-
-      // Sign up with Supabase Auth
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name: name,
-          },
-        },
-      })
-
-      if (error) {
-        console.error("Signup error:", error)
-
-        // Handle specific Supabase errors
-        switch (error.message) {
-          case "User already registered":
-            throw new Error("An account with this email already exists. Please sign in instead.")
-          case "Password should be at least 6 characters":
-            throw new Error("Password must be at least 6 characters long.")
-          case "Invalid email":
-            throw new Error("Please enter a valid email address.")
-          case "Signup is disabled":
-            throw new Error("Account registration is currently disabled. Please contact support.")
-          default:
-            throw new Error(error.message || "Failed to create account. Please try again.")
-        }
-      }
-
-      if (!data.user) {
-        throw new Error("Failed to create user account. Please try again.")
-      }
-
-      // If user is created but session doesn't exist (email confirmation required)
-      if (data.user && !data.session) {
-        console.log("User created, email confirmation required")
-        return {
-          user: data.user,
-          session: null,
-          needsConfirmation: true,
-        }
-      }
-
-      // If user is created and session exists (auto-confirmed)
-      if (data.user && data.session) {
-        console.log("User created and auto-signed in")
-
-        // Wait a moment for the database trigger to create the profile
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-
-        // Verify the profile was created
-        try {
-          await this.getUserProfile(data.user.id)
-        } catch (profileError) {
-          console.warn("Profile not found, creating manually:", profileError)
-          // Create profile manually if trigger failed
-          await supabase.from("users").insert({
-            id: data.user.id,
-            email: data.user.email!,
-            name: name,
-          })
-        }
-
-        return {
-          user: data.user,
-          session: data.session,
-          needsConfirmation: false,
-        }
-      }
-
-      return data
-    } catch (error: any) {
-      console.error("Auth service signup error:", error)
-      throw error
-    }
-  },
-
-  async signIn(email: string, password: string) {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) {
-        console.error("Signin error:", error)
-
-        // Handle specific Supabase errors
-        switch (error.message) {
-          case "Invalid login credentials":
-            throw new Error("Invalid email or password. Please check your credentials and try again.")
-          case "Email not confirmed":
-            throw new Error("Please check your email and click the confirmation link before signing in.")
-          case "Too many requests":
-            throw new Error("Too many login attempts. Please wait a few minutes before trying again.")
-          case "User not found":
-            throw new Error("No account found with this email address. Please sign up first.")
-          default:
-            throw new Error(error.message || "Failed to sign in. Please try again.")
-        }
-      }
-
-      if (!data.session) {
-        throw new Error("Failed to create session. Please try again.")
-      }
-
-      return data
-    } catch (error: any) {
-      console.error("Auth service signin error:", error)
-      throw error
-    }
-  },
-
-  async signOut() {
-    try {
-      const { error } = await supabase.auth.signOut()
-      if (error) {
-        console.error("Signout error:", error)
-        throw new Error("Failed to sign out. Please try again.")
-      }
-    } catch (error: any) {
-      console.error("Auth service signout error:", error)
-      throw error
-    }
-  },
-
-  /**
-   * Returns the current authenticated user or `null` if no session exists.
-   * Supabase will throw the “Auth session missing!” error when there’s no persisted
-   * session (e.g. first-time visitors). We treat that case as an unauthenticated user
-   * and suppress the console noise.
-   */
+  /** Get the current authenticated user from Supabase Auth */
   async getCurrentUser() {
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession()
+    const { data, error } = await supabase.auth.getSession()
 
-      // If there’s no session, the visitor is simply not logged in.
-      if (!session || sessionError) return null
-
-      return session.user
-    } catch (err) {
-      // Any network/server error gets logged for debugging, but we still return null
-      console.error("Auth service getCurrentUser error:", err)
+    if (error) {
+      console.error("Auth session error:", error)
       return null
     }
+
+    if (!data?.session) {
+      // console.log("Auth session missing!") // Silenced as per previous fix
+      return null
+    }
+
+    return data.session.user
   },
 
-  async getUserProfile(userId: string) {
-    try {
-      const { data, error } = await supabase.from("users").select("*").eq("id", userId).single()
+  /** Get a user's profile from the 'users' table */
+  async getUserProfile(userId: string): Promise<UserProfile | null> {
+    const { data, error } = await supabase.from("users").select("*").eq("id", userId).maybeSingle()
 
-      if (error) {
-        console.error("Get profile error:", error)
-        throw new Error("Failed to load user profile.")
+    if (error) {
+      console.error("Get profile error:", error)
+      throw new Error("Failed to fetch user profile.")
+    }
+
+    return data || null
+  },
+
+  /** Sign up a new user */
+  async signUp(email: string, password: string, name: string) {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+        },
+      },
+    })
+
+    if (error) {
+      console.error("Signup error:", error)
+      throw new Error(error.message || "Signup failed.")
+    }
+
+    // Attempt to create user profile if not automatically created by trigger
+    if (data.user && data.user.id) {
+      const existingProfile = await this.getUserProfile(data.user.id)
+      if (!existingProfile) {
+        const { error: profileError } = await supabase.from("users").insert({
+          id: data.user.id,
+          email: data.user.email,
+          name: name,
+          points: 0,
+        })
+        if (profileError) {
+          console.error("Error creating user profile after signup:", profileError)
+          throw new Error("Signup successful, but failed to create user profile.")
+        }
       }
-
-      return data
-    } catch (error: any) {
-      console.error("Auth service get profile error:", error)
-      throw error
     }
+
+    return data
   },
 
-  async updateUserProfile(userId: string, updates: { name?: string; avatar_url?: string }) {
-    try {
-      const { data, error } = await supabase.from("users").update(updates).eq("id", userId).select().single()
+  /** Sign in an existing user */
+  async signIn(email: string, password: string) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
-      if (error) {
-        console.error("Update profile error:", error)
-        throw new Error("Failed to update profile.")
-      }
-
-      return data
-    } catch (error: any) {
-      console.error("Auth service update profile error:", error)
-      throw error
+    if (error) {
+      console.error("Signin error:", error)
+      throw new Error(error.message || "Invalid login credentials.")
     }
+
+    return data
   },
 
-  onAuthStateChange(callback: (event: string, session: any) => void) {
-    return supabase.auth.onAuthStateChange(callback)
-  },
+  /** Sign out the current user */
+  async signOut() {
+    const { error } = await supabase.auth.signOut()
 
-  // Utility function to validate email format
-  isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    return emailRegex.test(email)
-  },
-
-  // Utility function to validate password strength
-  validatePassword(password: string): { isValid: boolean; message?: string } {
-    if (password.length < 6) {
-      return { isValid: false, message: "Password must be at least 6 characters long." }
+    if (error) {
+      console.error("Signout error:", error)
+      throw new Error("Failed to sign out.")
     }
-    if (password.length > 128) {
-      return { isValid: false, message: "Password must be less than 128 characters long." }
-    }
-    if (!/[a-zA-Z]/.test(password)) {
-      return { isValid: false, message: "Password must contain at least one letter." }
-    }
-    return { isValid: true }
   },
 }

@@ -1,78 +1,113 @@
-import { supabase, type Swap } from "./supabase"
+import { supabase } from "./supabase"
 
+/* =========================================================================
+   Types
+   ====================================================================== */
+export interface Swap {
+  id: string
+  item_id: string
+  requester_id: string
+  status: "pending" | "accepted" | "rejected" | "completed"
+  requested_at: string
+
+  /* Joined data */
+  item?: {
+    id: string
+    title: string
+    point_value: number
+    images: string[] | null
+    owner_id: string
+  }
+  requester?: {
+    id: string
+    name: string | null
+    avatar_url: string | null
+  }
+}
+
+/* =========================================================================
+   Helpers
+   ====================================================================== */
+function _wrapError(scope: string, error: any) {
+  console.error(`${scope} error:`, error)
+  throw new Error("Something went wrong. Please try again.")
+}
+
+/* =========================================================================
+   Service
+   ====================================================================== */
 export const swapsService = {
-  async createSwapRequest(itemId: string, requesterId: string): Promise<Swap> {
+  /* ---------------------------------------------------------------------
+   * Create a new swap request
+   * ------------------------------------------------------------------ */
+  async requestSwap(itemId: string, requesterId: string): Promise<Swap> {
+    // Ensure the item exists and we know its owner (needed elsewhere).
+    const { data: item, error: itemErr } = await supabase
+      .from("items")
+      .select("owner_id")
+      .eq("id", itemId)
+      .maybeSingle()
+
+    if (itemErr || !item) {
+      _wrapError("swapsService.requestSwap (lookup item)", itemErr)
+    }
+
     const { data, error } = await supabase
       .from("swaps")
       .insert({
         item_id: itemId,
         requester_id: requesterId,
-        status: "requested",
+        status: "pending",
       })
       .select()
       .single()
 
-    if (error) throw error
-    return data
+    if (error) _wrapError("swapsService.requestSwap (insert)", error)
+
+    return data as unknown as Swap
   },
 
+  /* ---------------------------------------------------------------------
+   * Get all swaps where the current user is either the requester OR
+   * the owner of the item being requested.
+   * ------------------------------------------------------------------ */
   async getUserSwaps(userId: string): Promise<Swap[]> {
     const { data, error } = await supabase
       .from("swaps")
-      .select(`
-        *,
-        item:items(*),
-        requester:users(*)
-      `)
-      .or(`requester_id.eq.${userId},item_id.in.(select id from items where owner_id = '${userId}')`)
+      .select(
+        `
+          *,
+          item:items (
+            id,
+            title,
+            point_value,
+            images,
+            owner_id
+          ),
+          requester:users (
+            id,
+            name,
+            avatar_url
+          )
+        `,
+      )
+      // requester_id == user OR item.owner_id == user
+      .or(`requester_id.eq.${userId},item.owner_id.eq.${userId}`)
       .order("requested_at", { ascending: false })
 
-    if (error) throw error
-    return data || []
+    if (error) _wrapError("swapsService.getUserSwaps", error)
+
+    return data as unknown as Swap[]
   },
 
-  async updateSwapStatus(swapId: string, status: Swap["status"]): Promise<Swap> {
-    const { data, error } = await supabase.from("swaps").update({ status }).eq("id", swapId).select().single()
+  /* ---------------------------------------------------------------------
+   * Update swap status
+   * ------------------------------------------------------------------ */
+  async updateSwapStatus(id: string, status: Swap["status"]): Promise<Swap> {
+    const { data, error } = await supabase.from("swaps").update({ status }).eq("id", id).select().single()
 
-    if (error) throw error
-    return data
-  },
+    if (error) _wrapError("swapsService.updateSwapStatus", error)
 
-  async completeSwap(swapId: string) {
-    // Update swap status
-    await this.updateSwapStatus(swapId, "completed")
-
-    // Get swap details
-    const { data: swap, error: swapError } = await supabase
-      .from("swaps")
-      .select(`
-        *,
-        item:items(*)
-      `)
-      .eq("id", swapId)
-      .single()
-
-    if (swapError) throw swapError
-
-    // Award points to item owner
-    const { error: pointsError } = await supabase.from("points_transactions").insert({
-      user_id: swap.item.owner_id,
-      type: "earn",
-      amount: swap.item.point_value,
-      swap_id: swapId,
-    })
-
-    if (pointsError) throw pointsError
-
-    // Update user points
-    const { error: userError } = await supabase.rpc("increment_user_points", {
-      user_id: swap.item.owner_id,
-      points: swap.item.point_value,
-    })
-
-    if (userError) throw userError
-
-    // Update item status
-    await supabase.from("items").update({ status: "swapped" }).eq("id", swap.item_id)
+    return data as unknown as Swap
   },
 }

@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
-import { Sparkles, User, Mail, Lock, ArrowRight, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react"
+import { Sparkles, Mail, CheckCircle2, Eye, EyeOff } from "lucide-react"
 import Link from "next/link"
+import { toast } from "@/components/ui/use-toast"
 
 interface FormErrors {
   name?: string
@@ -23,19 +23,16 @@ interface FormErrors {
 }
 
 export default function SignUpPage() {
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  })
-  const [errors, setErrors] = useState<FormErrors>({})
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
-  const [success, setSuccess] = useState(false)
-  const [needsConfirmation, setNeedsConfirmation] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [passwordStrength, setPasswordStrength] = useState(0)
+  const [needsConfirmation, setNeedsConfirmation] = useState(false)
+  const [success, setSuccess] = useState(false)
   const router = useRouter()
 
   // Real-time validation
@@ -59,7 +56,7 @@ export default function SignUpPage() {
 
       case "confirmPassword":
         if (!value) return "Please confirm your password"
-        if (value !== formData.password) return "Passwords do not match"
+        if (value !== password) return "Passwords do not match"
         return undefined
 
       default:
@@ -80,90 +77,79 @@ export default function SignUpPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
 
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    switch (name) {
+      case "name":
+        setName(value)
+        break
+      case "email":
+        setEmail(value)
+        break
+      case "password":
+        setPassword(value)
+        setPasswordStrength(calculatePasswordStrength(value))
+        const confirmError = validateField("confirmPassword", confirmPassword)
+        setConfirmPassword(confirmError ? "" : confirmPassword)
+        break
+      case "confirmPassword":
+        setConfirmPassword(value)
+        break
+      default:
+        break
+    }
 
     // Clear previous error for this field
-    if (errors[name as keyof FormErrors]) {
-      setErrors((prev) => ({ ...prev, [name]: undefined }))
-    }
-
-    // Real-time validation
     const error = validateField(name, value)
     if (error) {
-      setErrors((prev) => ({ ...prev, [name]: error }))
+      toast({
+        title: "Validation Error",
+        description: error,
+        variant: "destructive",
+      })
     }
-
-    // Update password strength
-    if (name === "password") {
-      setPasswordStrength(calculatePasswordStrength(value))
-    }
-
-    // Validate confirm password when password changes
-    if (name === "password" && formData.confirmPassword) {
-      const confirmError = validateField("confirmPassword", formData.confirmPassword)
-      setErrors((prev) => ({ ...prev, confirmPassword: confirmError }))
-    }
-  }
-
-  const validateForm = (): boolean => {
-    const newErrors: FormErrors = {}
-
-    // Validate all fields
-    Object.entries(formData).forEach(([key, value]) => {
-      const error = validateField(key, value)
-      if (error) {
-        newErrors[key as keyof FormErrors] = error
-      }
-    })
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    // Clear previous general error
-    setErrors((prev) => ({ ...prev, general: undefined }))
-
-    if (!validateForm()) {
-      return
-    }
-
     setLoading(true)
 
     try {
-      console.log("Starting signup process...")
+      const { data, error } = await authService.signUp(email, password, name)
 
-      const result = await authService.signUp(formData.email.trim(), formData.password, formData.name.trim())
+      if (error) {
+        throw error
+      }
 
-      console.log("Signup result:", result)
-
-      if (result.needsConfirmation) {
-        console.log("Email confirmation required")
-        setNeedsConfirmation(true)
+      if (data?.user) {
+        toast({
+          title: "Signup Successful!",
+          description: "Your account has been created. Welcome to ReWear!",
+          variant: "success",
+        })
+        router.push("/dashboard")
       } else {
-        console.log("Signup successful, redirecting...")
-        setSuccess(true)
-        setTimeout(() => {
-          router.push("/dashboard")
-        }, 1500)
+        // This case should ideally not be hit if authService.signUp throws on error
+        toast({
+          title: "Signup Failed",
+          description: "An unexpected issue occurred during signup. Please try again.",
+          variant: "destructive",
+        })
       }
     } catch (error: any) {
       console.error("Signup error:", error)
-
-      // Handle specific error types
-      const errorMessage = error.message || "An unexpected error occurred. Please try again."
-
-      if (errorMessage.includes("email already exists") || errorMessage.includes("User already registered")) {
-        setErrors({ email: "An account with this email already exists. Please sign in instead." })
-      } else if (errorMessage.includes("Invalid email")) {
-        setErrors({ email: "Please enter a valid email address." })
-      } else if (errorMessage.includes("Password")) {
-        setErrors({ password: errorMessage })
+      let errorMessage = "An unexpected error occurred. Please try again."
+      if (error.message.includes("User already registered")) {
+        errorMessage = "This email is already registered. Please log in or use a different email."
+      } else if (error.message.includes("Password should be at least 6 characters")) {
+        errorMessage = "Password must be at least 6 characters long."
       } else {
-        setErrors({ general: errorMessage })
+        errorMessage = error.message
       }
+
+      toast({
+        title: "Signup Failed",
+        description: errorMessage,
+        variant: "destructive",
+      })
     } finally {
       setLoading(false)
     }
@@ -182,8 +168,8 @@ export default function SignUpPage() {
                 Check Your Email
               </h2>
               <p className="text-gray-600 text-lg mb-6">
-                We've sent you a confirmation link at <strong>{formData.email}</strong>. Please check your email and
-                click the link to activate your account.
+                We've sent you a confirmation link at <strong>{email}</strong>. Please check your email and click the
+                link to activate your account.
               </p>
               <div className="space-y-3">
                 <Link href="/auth/login">
@@ -241,8 +227,8 @@ export default function SignUpPage() {
   }
 
   return (
-    <div className="min-h-screen gradient-primary flex items-center justify-center p-4">
-      <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md grid lg:grid-cols-2 gap-8 items-center">
         {/* Left Side - Branding */}
         <div className="hidden lg:block text-white animate-fade-in-up">
           <div className="space-y-8">
@@ -293,94 +279,51 @@ export default function SignUpPage() {
 
             <CardContent className="space-y-6">
               <form onSubmit={handleSubmit} className="space-y-6">
-                {errors.general && (
-                  <Alert variant="destructive" className="border-red-200 bg-red-50">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription className="text-red-800">{errors.general}</AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="name" className="text-sm font-semibold text-gray-700">
-                    Full Name
-                  </Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                    <Input
-                      id="name"
-                      name="name"
-                      type="text"
-                      value={formData.name}
-                      onChange={handleInputChange}
-                      required
-                      placeholder="Enter your full name"
-                      className={`pl-10 h-12 border-gray-200 focus:border-purple-500 focus:ring-purple-500 rounded-xl ${
-                        errors.name ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""
-                      }`}
-                    />
-                  </div>
-                  {errors.name && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4" />
-                      {errors.name}
-                    </p>
-                  )}
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm font-semibold text-gray-700">
-                    Email Address
-                  </Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                    <Input
-                      id="email"
-                      name="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      required
-                      placeholder="Enter your email"
-                      className={`pl-10 h-12 border-gray-200 focus:border-purple-500 focus:ring-purple-500 rounded-xl ${
-                        errors.email ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""
-                      }`}
-                    />
-                  </div>
-                  {errors.email && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4" />
-                      {errors.email}
-                    </p>
-                  )}
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-sm font-semibold text-gray-700">
-                    Password
-                  </Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="password">Password</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                     <Input
                       id="password"
-                      name="password"
                       type={showPassword ? "text" : "password"}
-                      value={formData.password}
-                      onChange={handleInputChange}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       required
-                      placeholder="Create a secure password"
-                      className={`pl-10 pr-10 h-12 border-gray-200 focus:border-purple-500 focus:ring-purple-500 rounded-xl ${
-                        errors.password ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""
-                      }`}
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-1"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                    </button>
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      <span className="sr-only">{showPassword ? "Hide password" : "Show password"}</span>
+                    </Button>
                   </div>
-                  {formData.password && (
+                  {password && (
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-600">Password strength:</span>
@@ -393,77 +336,39 @@ export default function SignUpPage() {
                       <Progress value={passwordStrength} className="h-2" />
                     </div>
                   )}
-                  {errors.password && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4" />
-                      {errors.password}
-                    </p>
-                  )}
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword" className="text-sm font-semibold text-gray-700">
-                    Confirm Password
-                  </Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                     <Input
                       id="confirmPassword"
-                      name="confirmPassword"
                       type={showConfirmPassword ? "text" : "password"}
-                      value={formData.confirmPassword}
-                      onChange={handleInputChange}
+                      placeholder="••••••••"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
                       required
-                      placeholder="Confirm your password"
-                      className={`pl-10 pr-10 h-12 border-gray-200 focus:border-purple-500 focus:ring-purple-500 rounded-xl ${
-                        errors.confirmPassword ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""
-                      }`}
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-1"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                    </button>
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      <span className="sr-only">{showConfirmPassword ? "Hide password" : "Show password"}</span>
+                    </Button>
                   </div>
-                  {errors.confirmPassword && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4" />
-                      {errors.confirmPassword}
-                    </p>
-                  )}
                 </div>
-
-                <Button
-                  type="submit"
-                  className="w-full h-12 gradient-primary text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                  disabled={loading || Object.keys(errors).some((key) => errors[key as keyof FormErrors])}
-                >
-                  {loading ? (
-                    <div className="flex items-center space-x-2">
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Creating Account...</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center space-x-2">
-                      <span>Create Account</span>
-                      <ArrowRight className="h-5 w-5" />
-                    </div>
-                  )}
+                <Button type="submit" className="w-full bg-green-600 hover:bg-green-700" disabled={loading}>
+                  {loading ? "Signing Up..." : "Sign Up"}
                 </Button>
               </form>
-
-              <div className="text-center pt-4">
-                <p className="text-gray-600">
-                  Already have an account?{" "}
-                  <Link
-                    href="/auth/login"
-                    className="font-semibold text-purple-600 hover:text-purple-700 transition-colors"
-                  >
-                    Sign in
-                  </Link>
-                </p>
+              <div className="mt-6 text-center text-sm text-gray-600">
+                Already have an account?{" "}
+                <Link href="/auth/login" className="font-medium text-green-600 hover:text-green-700">
+                  Sign In
+                </Link>
               </div>
             </CardContent>
           </Card>

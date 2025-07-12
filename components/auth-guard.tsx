@@ -5,59 +5,30 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { authService } from "@/lib/auth"
+import { LoadingSkeleton } from "./loading-skeleton"
 
 interface AuthGuardProps {
   children: React.ReactNode
-  redirectTo?: string
 }
 
-export function AuthGuard({ children, redirectTo = "/auth/login" }: AuthGuardProps) {
-  const [user, setUser] = useState<any>(null)
+export function AuthGuard({ children }: AuthGuardProps) {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
-    checkAuth()
-
-    const {
-      data: { subscription },
-    } = authService.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT" || !session) {
-        router.push(redirectTo)
+    const checkAuth = async () => {
+      const user = await authService.getCurrentUser()
+      if (!user) {
+        router.push("/auth/login")
       } else {
-        setUser(session.user)
+        setLoading(false)
       }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [redirectTo, router])
-
-  const checkAuth = async () => {
-    try {
-      const currentUser = await authService.getCurrentUser()
-      if (!currentUser) {
-        router.push(redirectTo)
-      } else {
-        setUser(currentUser)
-      }
-    } catch (error) {
-      console.error("Auth check failed:", error)
-      router.push(redirectTo)
-    } finally {
-      setLoading(false)
     }
-  }
+    checkAuth()
+  }, [router])
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-green-600"></div>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return null
+    return <LoadingSkeleton />
   }
 
   return <>{children}</>

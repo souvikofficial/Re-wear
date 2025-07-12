@@ -1,50 +1,42 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
+import { Mona_Sans as FontSans } from "next/font/google"
 import "./globals.css"
+import { cn } from "@/lib/utils"
+import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/toaster"
 
-// Optimize Google Fonts loading with Next.js font optimization
-const inter = Inter({
+// Configure Google Font with display and preload options
+const fontSans = FontSans({
   subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-sans",
+  display: "swap", // Ensures text is visible during font load
+  preload: true, // Preload the font for better performance
 })
 
 export const metadata: Metadata = {
-  title: "ReWear - Sustainable Fashion Exchange",
-  description:
-    "Join our community of conscious fashion lovers. Exchange clothes, earn points, and help reduce textile waste.",
-  keywords: ["sustainable fashion", "clothing exchange", "circular economy", "fashion community"],
-  authors: [{ name: "ReWear Team" }],
-  viewport: "width=device-width, initial-scale=1",
-  themeColor: "#8e45ad",
+  title: "ReWear",
+  description: "Community clothing exchange platform",
     generator: 'v0.dev'
 }
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
+}>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Preconnect to Google Fonts for better performance */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-
-        {/* Fallback for older browsers */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-
-        {/* Meta tags for better SEO and performance */}
-        <meta name="format-detection" content="telephone=no" />
-        <meta name="msapplication-tap-highlight" content="no" />
+        {/* Preload the font to prevent FOUT/FOIT */}
+        <link rel="preload" href={fontSans.url} as="font" type="font/woff2" crossOrigin="anonymous" />
       </head>
-      <body className={`${inter.className} antialiased`}>{children}</body>
+      <body className={cn("min-h-screen bg-background font-sans antialiased", fontSans.variable)}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          {children}
+          <Toaster />
+        </ThemeProvider>
+      </body>
     </html>
   )
 }
